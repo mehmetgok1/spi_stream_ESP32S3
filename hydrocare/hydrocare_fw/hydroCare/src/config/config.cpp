@@ -31,15 +31,9 @@ void initPins(){
 }
 
 void initPeripherals(){
-
   setCpuFrequencyMhz(80);
-
   Serial.begin(115200);
-
   SPI.begin(SCK, MISO, MOSI, SD_CS);
-
   analogReadResolution(12);
-
-  // Set ADC attenuation for full 0-3.3V range
   analogSetPinAttenuation(AmbLight, ADC_11db);
 }

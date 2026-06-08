@@ -54,10 +54,8 @@ void initSessionFolder() {
   sessionFolder = String(timestamp);
   
   Serial.println("Creating session folder: /" + sessionFolder);
-  
   // Create main session folder with leading slash for consistency
   bool created = SD.mkdir(("/" + sessionFolder).c_str());
-  
   if (created) {
     Serial.println("Session folder created successfully: /" + sessionFolder);
   } else {

@@ -54,8 +54,6 @@ class ActionCallbacks: public NimBLECharacteristicCallbacks {
             String command = String(value.c_str());
             Serial.print("[BLE] Command Received: ");
             Serial.println(command);
-
-            // --- OTA PARSER ---
             if (command.startsWith("Com;OTA")) {
                 int firstSemi  = command.indexOf(';');
                 int secondSemi = command.indexOf(';', firstSemi + 1);
@@ -78,9 +76,7 @@ class ActionCallbacks: public NimBLECharacteristicCallbacks {
                 // command is "Com;Start;session001"
                 int firstSemi  = command.indexOf(';');          // Position of 1st ';'
                 int secondSemi = command.indexOf(';', firstSemi + 1); // Position of 2nd ';'
-                
                 String label = "Default";
-                
                 // If there is a semicolon after "Start", the label starts at secondSemi + 1
                 if (secondSemi != -1 && command.length() > secondSemi + 1) {
                     label = command.substring(secondSemi + 1);
@@ -89,13 +85,7 @@ class ActionCallbacks: public NimBLECharacteristicCallbacks {
 
                 deviceStatus = 1;
                 Serial.println("\n[BLE] Logging started - Creating new session folder...");
-                
-                // Create a new session folder for this BLE connection
-                initSessionFolder();
-                // openMicAccelFile();   // DISABLED - SD task now handles append-based logging
-                // initSensorDataFile(); // DISABLED - SD task now handles append-based logging
-                // NOTE: RGB and IR are written per-packet in SD task, sensor/accel append to single files
-                
+                initSessionFolder();     
                 sessionInitialized = true;  // NOW safe to log
                 Serial.println("[BLE] Session files ready for logging");
             }
@@ -103,7 +93,6 @@ class ActionCallbacks: public NimBLECharacteristicCallbacks {
             else if(command.startsWith("Com;Stop")){
                 deviceStatus = 0;
                 sessionInitialized = false;  // Reset for next session
-                // RGB/IR files are already closed by SD task after each write
                 Serial.println("[SD] Stop Logging. Session ended.");
             }
             // --- CONTROL PARSER ---

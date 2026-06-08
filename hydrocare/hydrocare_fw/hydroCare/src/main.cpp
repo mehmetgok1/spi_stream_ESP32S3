@@ -12,56 +12,45 @@
 bool deviceStatus = false; // false = stopped, true = logging
 bool sessionInitialized = false; // true = session folders and files ready
 
-// Buffer for downsampled 16x16 RGB565 frame (256 pixels * 2 bytes = 512 bytes)
 uint16_t downsampled16x16[256];  // Shared with BLE for transmission
-// Buffer for IR thermal frame 16x12 (192 pixels * 2 bytes = 384 bytes)
 uint16_t irFrame16x12[192];      // Shared with BLE for transmission
 
-// FreeRTOS Queue for sensor data (non-blocking SD logging)
 QueueHandle_t sensorDataQueue = NULL;
 const int SENSOR_QUEUE_SIZE = 3;  // Buffer up to 3 packets (3 seconds of data)
 
 // ==================== COMBINED DATA PACKET ====================
-// Includes both master sensor readings and slave sensor data
 #pragma pack(1)
 typedef struct {
-  // MASTER SENSOR READINGS
-  float batteryLevel;             // Battery voltage
-  float batteryPercentage;        // Battery percentage (0-100%)
-  float ambLight;                 // Ambient light
-  uint16_t ambLight_Int;          // Ambient light (uint16)
-  float PIRValue;                 // PIR motion detection
-  uint16_t movingDist;            // mmWave moving target distance
-  uint8_t movingEnergy;           // mmWave moving target energy
-  uint16_t staticDist;            // mmWave static target distance
-  uint8_t staticEnergy;           // mmWave static target energy
-  uint16_t detectionDist;         // mmWave detection distance
-  
-  // SLAVE SENSOR PACKET
-  SensorDataPacket slaveData;     // All slave sensor data
+  float batteryLevel;             
+  float batteryPercentage;        
+  float ambLight;                 
+  uint16_t ambLight_Int;          
+  float PIRValue;                 
+  uint16_t movingDist;            
+  uint8_t movingEnergy;           
+  uint16_t staticDist;            
+  uint8_t staticEnergy;           
+  uint16_t detectionDist;         
+  SensorDataPacket slaveData;     
 } CombinedDataPacket;
 #pragma pack()
 
-// SD Card logging task - BINARY APPROACH with 50-packet file rotation
 // Creates new binary file every 50 packets (e.g., part_0.bin, part_50.bin, part_100.bin)
 void sdCardLoggingTask(void *parameter) {
   static CombinedDataPacket packet;  // Static allocation - not on stack
   uint32_t packetsLogged = 0;
-  
   Serial.println("[SD-TASK] SD logging task started (BINARY mode - high speed, 50-packet rotation)");
-  
   while(1) {
-    // Wait for packet from main loop (blocks if queue empty)
+
     if (xQueueReceive(sensorDataQueue, &packet, portMAX_DELAY)) {
       uint32_t taskStart = millis();  // Start timing this packet
       
       // Validate packet before logging
-      if (packet.slaveData.sequence == 0 || packet.slaveData.temperature == 0.0) {
+      if (packet.slaveData.temperature == 0.0 || packet.slaveData.sequence == 0xFFFF) {
         Serial.printf("[SD-TASK-ERR] Dropped invalid packet (seq=%u, temp=%.1f)\n", 
                      packet.slaveData.sequence, packet.slaveData.temperature);
-        continue;  // Skip this packet
+        continue;  
       }
-      
       // Calculate which part file to use (every 50 packets = new file)
       uint32_t fileIndex = (packetsLogged / 50) * 50;
       char dataFile[128];
@@ -77,9 +66,6 @@ void sdCardLoggingTask(void *parameter) {
           continue;
         }
       }
-      
-      // CRITICAL OPTIMIZATION: Write entire struct as binary (NO printf, NO loops, NO conversions)
-      // This is ~100x faster than CSV approach
       uint32_t writeStart = micros();  // Microsecond precision for SD timing
       size_t written = df.write((const uint8_t*)&packet, sizeof(CombinedDataPacket));
       uint32_t writeTime = micros() - writeStart;
@@ -87,7 +73,6 @@ void sdCardLoggingTask(void *parameter) {
       uint32_t closeStart = micros();
       df.close();  // Close after every packet ensures data durability
       uint32_t closeTime = micros() - closeStart;
-      
       if (written != sizeof(CombinedDataPacket)) {
         Serial.printf("[SD-TASK-ERR] Incomplete write! Expected %d bytes, wrote %d bytes\n", 
                      sizeof(CombinedDataPacket), written);
@@ -108,7 +93,6 @@ void setup() {
   initPeripherals();
   initLed();
   initSD();
-  // Session folder will be created when BLE connection starts logging
   uiInit();
   initmmWave();
   initBLE();
@@ -135,11 +119,7 @@ void setup() {
     1                       // Core 1 (leave core 0 for main)
   );
   
-
   Serial.println("\n=== HYDROCARE MASTER - SPI SENSOR ACQUISITION ===");
-  Serial.println("Reading sensor data from slave via SPI protocol");
-  Serial.println("SPI Clock: 10 MHz, Buffer: 20k bytes");
-  Serial.println("SD logging: Queue-based (non-blocking)\n");
 }
 
 void loop() {
@@ -183,9 +163,7 @@ void loop() {
       memcpy(&combinedPacket.slaveData, slaveData, sizeof(SensorDataPacket));
       
       // Queue the combined packet
-      if (xQueueSend(sensorDataQueue, (void *)&combinedPacket, 0) == pdTRUE) {
-        Serial.printf("[QUEUE] Combined packet queued\n");
-      } else {
+      if (!(xQueueSend(sensorDataQueue, (void *)&combinedPacket, 0) == pdTRUE)) {
         Serial.println("[QUEUE] WARNING: Queue full, packet dropped");
       }
     }

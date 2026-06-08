@@ -216,7 +216,7 @@ SensorDataPacket* readSlaveData() {
       measured = true;
       break;
     }
-    delay(2);
+    delay(10);
   }
   if (!measured) {
     Serial.println("[Master] ERROR: Timeout waiting for STATUS_MEASURED");
@@ -225,7 +225,7 @@ SensorDataPacket* readSlaveData() {
   // ========== STEP 3: Set Lock ==========
   spiWrite(ADDR_CTRL, CTRL_LOCK_BUFFERS);
   Serial.println("[Master] write lock data trigger");
-  delay(2);
+  delay(10);
   // ========== STEP 4: Poll for LOCKED status ==========
   startTime = millis();
   bool locked = false;
@@ -235,7 +235,7 @@ SensorDataPacket* readSlaveData() {
       locked = true;
       break;
     }
-    delay(3);
+    delay(5);
   }
   if (!locked) {
     Serial.println("[Master] ERROR: Timeout waiting for STATUS_LOCKED");
@@ -246,10 +246,10 @@ SensorDataPacket* readSlaveData() {
   Serial.println("[Master] Ready to process sensor data packet");
 
   // ========== STEP 6: Release Lock ==========
-  delay(1);
+  delay(10);
   spiWrite(ADDR_CTRL, CTRL_UNLOCK_BUFFERS);
   Serial.println("[Master] write unlock buffers command");
-  delay(1);
+  delay(10);
   // Cast packet directly (data starts at byte 0 - pure sensor packet)
   SensorDataPacket *packet = (SensorDataPacket*)(spiRxBuffer);
   
@@ -257,8 +257,6 @@ SensorDataPacket* readSlaveData() {
   Serial.printf("[Packet] Sequence: %u | Temp: %.1f°C | Humidity: %.1f%% | Light: %u\n",
     packet->sequence, packet->temperature, packet->humidity, packet->ambientLight);
   
-  Serial.printf("[Samples] Accel count: %u | X:%+d Y:%+d Z:%+d mG\n",
-    packet->accelSampleCount, packet->accelX, packet->accelY, packet->accelZ);
   return packet;
 }
 
