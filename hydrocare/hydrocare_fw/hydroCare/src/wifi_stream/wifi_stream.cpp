@@ -6,6 +6,7 @@ extern String server_ip;
 
 void streamFolderToTCP(String folderName)
 {
+    uint32_t taskStart = millis();  // Start timing this packet
     WiFiClient client;
 
     if (!client.connect(server_ip.c_str(), 8080))
@@ -45,5 +46,9 @@ void streamFolderToTCP(String folderName)
     }
 
     client.stop();
-    Serial.println("[TCP-STREAM] Transmission complete.");
+    uint32_t taskDuration = millis() - taskStart;
+    Serial.printf("[TCP-STREAM] Total streaming duration: %u ms\n", taskDuration);
 }
+
+    
+      
