@@ -16,6 +16,7 @@
 bool deviceConnected = false;
 bool sendRgbFlag = false;
 bool sendIrFlag = false;
+extern bool stream_wifi;
 extern String ssid, password, ver,server_ip; 
 extern bool wifi_connect;  // Flag to trigger WiFi connection in main loop
 extern bool sessionInitialized;  // Set to true when folder/files are ready
@@ -95,7 +96,7 @@ class ActionCallbacks: public NimBLECharacteristicCallbacks {
                 deviceStatus = 0;
                 sessionInitialized = false;  // Reset for next session
                 Serial.println("[SD] Stop Logging. files will be transmitted over TCP socket.");
-                streamFolderToTCP(sessionFolder);
+                stream_wifi=true;
             }
             // --- WiFi PARSER (with Label) ---
             else if (command.startsWith("Com;WiFi")) {

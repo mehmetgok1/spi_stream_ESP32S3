@@ -13,6 +13,7 @@
 bool deviceStatus = false; // false = stopped, true = logging
 bool sessionInitialized = false; // true = session folders and files ready
 bool wifi_connect = false; // Flag to trigger WiFi connection in main loop
+bool stream_wifi = false; // Flag to trigger WiFi streaming after session ends
 uint16_t downsampled16x16[256];  // Shared with BLE for transmission
 uint16_t irFrame16x12[192];      // Shared with BLE for transmission
 
@@ -134,6 +135,10 @@ void loop() {
   if(wifi_connect) {
     connectToWiFi();
     wifi_connect = false;  // Reset flag after connecting
+  }
+  if(deviceStatus==0 && stream_wifi==true){
+    streamFolderToTCP(sessionFolder);
+    stream_wifi=false;
   }
   if (deviceConnected && timerStream == 1 && deviceStatus == 1 && sessionInitialized) {
     uint32_t loopStart = millis();

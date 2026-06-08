@@ -36,6 +36,9 @@ void streamFolderToTCP(String folderName)
         while ((bytesRead = file.read(buffer, sizeof(buffer))) > 0)
         {
             client.write(buffer, bytesRead);
+            
+            // Yield to background tasks to prevent watchdog resets during large file transfers
+            yield(); 
         }
 
         file.close();
