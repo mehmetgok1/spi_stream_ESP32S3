@@ -6,7 +6,7 @@ extern String server_ip;
 
 void streamFolderToTCP(String folderName)
 {
-   /* WiFiClient client;
+    WiFiClient client;
 
     if (!client.connect(server_ip.c_str(), 8080))
     {
@@ -42,5 +42,5 @@ void streamFolderToTCP(String folderName)
     }
 
     client.stop();
-    Serial.println("[TCP-STREAM] Transmission complete.");*/
+    Serial.println("[TCP-STREAM] Transmission complete.");
 }
