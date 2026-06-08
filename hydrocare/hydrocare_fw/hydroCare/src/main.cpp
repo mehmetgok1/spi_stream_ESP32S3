@@ -17,9 +17,6 @@ bool stream_wifi = false; // Flag to trigger WiFi streaming after session ends
 uint16_t downsampled16x16[256];  // Shared with BLE for transmission
 uint16_t irFrame16x12[192];      // Shared with BLE for transmission
 
-QueueHandle_t sensorDataQueue = NULL;
-const int SENSOR_QUEUE_SIZE = 1;  // Buffer up to 3 packets (3 seconds of data)
-
 // ==================== COMBINED DATA PACKET ====================
 #pragma pack(1)
 typedef struct {
@@ -37,20 +34,25 @@ typedef struct {
 } CombinedDataPacket;
 #pragma pack()
 
+TaskHandle_t sdTaskHandle = NULL;
+SemaphoreHandle_t sdLogMutex = NULL;
+CombinedDataPacket globalLogPacket; // ONE global buffer replaces the 3 separate 24KB buffers!
+
 // Creates new binary file every 50 packets (e.g., part_0.bin, part_50.bin, part_100.bin)
 void sdCardLoggingTask(void *parameter) {
-  static CombinedDataPacket packet;  // Static allocation - not on stack
   uint32_t packetsLogged = 0;
   Serial.println("[SD-TASK] SD logging task started (BINARY mode - high speed, 50-packet rotation)");
   while(1) {
 
-    if (xQueueReceive(sensorDataQueue, &packet, portMAX_DELAY)) {
+    // Wait for the main loop to signal that new data is ready
+    if (ulTaskNotifyTake(pdTRUE, portMAX_DELAY)) {
       uint32_t taskStart = millis();  // Start timing this packet
       
-      // Validate packet before logging
-      if (packet.slaveData.temperature == 0.0 || packet.slaveData.sequence == 0xFFFF) {
+      xSemaphoreTake(sdLogMutex, portMAX_DELAY);
+      if (globalLogPacket.slaveData.temperature == 0.0 || globalLogPacket.slaveData.sequence == 0xFFFF) {
         Serial.printf("[SD-TASK-ERR] Dropped invalid packet (seq=%u, temp=%.1f)\n", 
-                     packet.slaveData.sequence, packet.slaveData.temperature);
+                     globalLogPacket.slaveData.sequence, globalLogPacket.slaveData.temperature);
+        xSemaphoreGive(sdLogMutex);
         continue;  
       }
       // Calculate which part file to use (every 50 packets = new file)
@@ -69,8 +71,10 @@ void sdCardLoggingTask(void *parameter) {
         }
       }
       uint32_t writeStart = micros();  // Microsecond precision for SD timing
-      size_t written = df.write((const uint8_t*)&packet, sizeof(CombinedDataPacket));
+      size_t written = df.write((const uint8_t*)&globalLogPacket, sizeof(CombinedDataPacket));
       uint32_t writeTime = micros() - writeStart;
+      
+      xSemaphoreGive(sdLogMutex); // Give back mutex immediately so main loop can prepare next packet
       
       uint32_t closeStart = micros();
       df.close();  // Close after every packet ensures data durability
@@ -102,22 +106,16 @@ void setup() {
   disableTimer();
   initSPIComm();
   
-  // Create FreeRTOS queue for sensor data (queue item size = CombinedDataPacket)
-  sensorDataQueue = xQueueCreate(SENSOR_QUEUE_SIZE, sizeof(CombinedDataPacket));
-  if (sensorDataQueue == NULL) {
-    Serial.println("[ERROR] Failed to create sensor queue!");
-  } else {
-    Serial.printf("[QUEUE] Created combined data queue (max %d packets)\n", SENSOR_QUEUE_SIZE);
-  }
+  sdLogMutex = xSemaphoreCreateMutex();
   
   // Create SD logging task (lower priority, gets 16KB stack - sufficient for CombinedDataPacket)
   xTaskCreatePinnedToCore(
     sdCardLoggingTask,      // Task function
     "SDLoggingTask",        // Task name
-    16384,                  // Stack size (16KB - CombinedDataPacket is ~15KB)
+    4096,                   // Stack size (Reduced to 4KB since CombinedDataPacket is now static)
     NULL,                   // Parameter
     1,                      // Priority (lower than main)
-    NULL,                   // Task handle
+    &sdTaskHandle,          // Task handle
     1                       // Core 1 (leave core 0 for main)
   );
   
@@ -153,29 +151,29 @@ void loop() {
     measuremmWave();
     
     // ==================== COMBINE AND PUSH TO QUEUE ====================
-    if (slaveData != nullptr && sensorDataQueue != NULL) {
-      // Create combined packet with master + slave data
-      static CombinedDataPacket combinedPacket = {};  // Static allocation - not on stack
+    if (slaveData != nullptr) {
       
+      xSemaphoreTake(sdLogMutex, portMAX_DELAY);
+
       // Copy master sensor readings
-      combinedPacket.batteryLevel = batteryLevel;
-      combinedPacket.batteryPercentage = batteryPercentage;
-      combinedPacket.ambLight = ambLight;
-      combinedPacket.ambLight_Int = ambLight_Int;
-      combinedPacket.PIRValue = PIRValue;
-      combinedPacket.movingDist = movingDist;
-      combinedPacket.movingEnergy = movingEnergy;
-      combinedPacket.staticDist = staticDist;
-      combinedPacket.staticEnergy = staticEnergy;
-      combinedPacket.detectionDist = detectionDist;
+      globalLogPacket.batteryLevel = batteryLevel;
+      globalLogPacket.batteryPercentage = batteryPercentage;
+      globalLogPacket.ambLight = ambLight;
+      globalLogPacket.ambLight_Int = ambLight_Int;
+      globalLogPacket.PIRValue = PIRValue;
+      globalLogPacket.movingDist = movingDist;
+      globalLogPacket.movingEnergy = movingEnergy;
+      globalLogPacket.staticDist = staticDist;
+      globalLogPacket.staticEnergy = staticEnergy;
+      globalLogPacket.detectionDist = detectionDist;
       
       // Copy slave sensor data
-      memcpy(&combinedPacket.slaveData, slaveData, sizeof(SensorDataPacket));
+      memcpy(&globalLogPacket.slaveData, slaveData, sizeof(SensorDataPacket));
       
-      // Queue the combined packet
-      if (!(xQueueSend(sensorDataQueue, (void *)&combinedPacket, 0) == pdTRUE)) {
-        Serial.println("[QUEUE] WARNING: Queue full, packet dropped");
-      }
+      xSemaphoreGive(sdLogMutex);
+
+      // Notify SD logging task that new data is ready
+      if (sdTaskHandle != NULL) xTaskNotifyGive(sdTaskHandle);
     }
     
     // ==================== BLE NOTIFICATION PHASE ====================
