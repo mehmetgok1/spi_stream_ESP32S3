@@ -6,7 +6,6 @@
 #include <cstddef>
 
 SPIClass spi(HSPI);
-static uint8_t *spiTxBuffer = NULL;
 static uint8_t *spiRxBuffer = NULL;
 
 void initSPIComm() {
@@ -15,18 +14,16 @@ void initSPIComm() {
   pinMode(SPI_CS, OUTPUT);
   digitalWrite(SPI_CS, HIGH);
   
-  spiTxBuffer = (uint8_t*) heap_caps_malloc(SPI_BUFFER_SIZE, MALLOC_CAP_DMA);
   spiRxBuffer = (uint8_t*) heap_caps_malloc(SPI_BUFFER_SIZE, MALLOC_CAP_DMA);
   
-  if (!spiTxBuffer || !spiRxBuffer) {
+  if (!spiRxBuffer) {
     Serial.println("[Master] DMA allocation failed!");
     while(1) delay(1000);
   }
   
-  memset(spiTxBuffer, 0, SPI_BUFFER_SIZE);
   memset(spiRxBuffer, 0, SPI_BUFFER_SIZE);
   
-  Serial.println("[Master] SPI Init OK - Protocol-based 10 MHz, 20KB DMA buffers");
+  Serial.println("[Master] SPI Init OK - Protocol-based 10 MHz, 20KB DMA buffer");
 }
 
 // ==================== PROTOCOL IMPLEMENTATION ====================
@@ -170,19 +167,13 @@ void spiReadBulk(uint8_t address, uint8_t *buffer, uint16_t numBytes) {
   digitalWrite(SPI_CS, LOW);
   delayMicroseconds(50);
   
-  // Fill TX buffer: first byte is command, rest are zeros (clock in slave response)
-  spiTxBuffer[0] = cmdByte;
-  memset(&spiTxBuffer[1], 0x00, numBytes + 1);  // Clear rest of buffer
-  
   // CRITICAL: Disable both interrupts AND FreeRTOS task switching during DMA transfer
   // This prevents BLE/SD tasks from interrupting the critical SPI operation
   taskDISABLE_INTERRUPTS();
-  spi.transferBytes(spiTxBuffer, spiRxBuffer, numBytes + 2);  // CMD + STATUS + DATA
+  spi.transfer(cmdByte);                             // CMD
+  uint8_t statusByte = spi.transfer(0x00);           // STATUS
+  spi.transferBytes(NULL, buffer, numBytes);         // DATA directly to buffer
   taskENABLE_INTERRUPTS();
-  
-  // Extract status from received byte 1 and sensor data from bytes 2+
-  uint8_t statusByte = spiRxBuffer[1];
-  memmove(buffer, &spiRxBuffer[2], numBytes);
   
   delayMicroseconds(50);
   digitalWrite(SPI_CS, HIGH);

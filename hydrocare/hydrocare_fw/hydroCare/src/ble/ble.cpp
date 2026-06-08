@@ -10,15 +10,15 @@
 #include "memory/memory.h"
 #include "config/config.h"
 #include "communication/communication.h"
+#include "wifi_stream/wifi_stream.h"
 
 // --- Globals ---
 bool deviceConnected = false;
 bool sendRgbFlag = false;
 bool sendIrFlag = false;
-
-// Session synchronization flag
+extern String ssid, password, ver,server_ip; 
+extern bool wifi_connect;  // Flag to trigger WiFi connection in main loop
 extern bool sessionInitialized;  // Set to true when folder/files are ready
-
 // External buffers from main.cpp and communication functions
 extern uint16_t downsampled16x16[256];  // 16x16 downsampled RGB frame
 extern uint16_t irFrame16x12[192];      // 16x12 IR thermal frame
@@ -89,11 +89,34 @@ class ActionCallbacks: public NimBLECharacteristicCallbacks {
                 sessionInitialized = true;  // NOW safe to log
                 Serial.println("[BLE] Session files ready for logging");
             }
+            
             // --- STOP PARSER ---
             else if(command.startsWith("Com;Stop")){
                 deviceStatus = 0;
                 sessionInitialized = false;  // Reset for next session
-                Serial.println("[SD] Stop Logging. Session ended.");
+                Serial.println("[SD] Stop Logging. files will be transmitted over TCP socket.");
+                streamFolderToTCP(sessionFolder);
+            }
+            // --- WiFi PARSER (with Label) ---
+            else if (command.startsWith("Com;WiFi")) {
+                // Format: Com;WiFi;SSID;PASSWORD;IP
+                int firstSemi  = command.indexOf(';');
+                int secondSemi = command.indexOf(';', firstSemi + 1);
+                int thirdSemi  = command.indexOf(';', secondSemi + 1);
+                int fourthSemi = command.indexOf(';', thirdSemi + 1);
+                if (secondSemi != -1 && thirdSemi != -1 && fourthSemi != -1) {
+                    String ssid_pre     = command.substring(secondSemi + 1, thirdSemi);
+                    String password_pre = command.substring(thirdSemi + 1, fourthSemi);
+                    String ipAddr_pre   = command.substring(fourthSemi + 1);
+                    
+                    // Update your globals
+                    ssid = ssid_pre;
+                    password = password_pre;
+                    server_ip = ipAddr_pre; 
+                    Serial.printf("[BLE] WiFi Config updated: %s, Server: %s:8080\n", 
+                                ssid.c_str(), server_ip.c_str());
+                }
+                wifi_connect = true;  // Trigger WiFi connection in main loop
             }
             // --- CONTROL PARSER ---
             else if (command.startsWith("Com;Control")) {

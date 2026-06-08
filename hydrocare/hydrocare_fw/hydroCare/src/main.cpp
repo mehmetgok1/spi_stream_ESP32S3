@@ -8,10 +8,11 @@
 #include "memory/memory.h"
 #include "ota/ota.h"
 #include "communication/communication.h"
+#include "wifi_stream/wifi_stream.h"
 
 bool deviceStatus = false; // false = stopped, true = logging
 bool sessionInitialized = false; // true = session folders and files ready
-
+bool wifi_connect = false; // Flag to trigger WiFi connection in main loop
 uint16_t downsampled16x16[256];  // Shared with BLE for transmission
 uint16_t irFrame16x12[192];      // Shared with BLE for transmission
 
@@ -129,6 +130,10 @@ void loop() {
     uiOTAStarted();
     connectToWiFi();
     performOTAUpdate();
+  }
+  if(wifi_connect) {
+    connectToWiFi();
+    wifi_connect = false;  // Reset flag after connecting
   }
   if (deviceConnected && timerStream == 1 && deviceStatus == 1 && sessionInitialized) {
     uint32_t loopStart = millis();

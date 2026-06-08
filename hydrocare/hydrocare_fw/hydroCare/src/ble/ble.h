@@ -14,7 +14,6 @@
 #define UUID_AMB_INT "11111111-1111-1111-2222-111111111118"
 
 extern bool deviceConnected;
-
 // --- Function Declarations ---
 void initBLE();
 void notifyAll();

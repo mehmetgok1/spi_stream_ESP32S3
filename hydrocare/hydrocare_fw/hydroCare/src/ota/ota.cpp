@@ -5,9 +5,10 @@
 #include <WiFiClientSecure.h>
 
 // WiFi credentials
-String ssid = "";
-String password = "";
-String ver = "";
+String ssid="";
+String password="";
+String ver="";
+String server_ip="";
 
 // Direct GitHub release URL for your .bin file
 String firmwareUrl = "https://github.com/onuryusufcinar/urinfo/releases/download/";
@@ -20,6 +21,8 @@ WiFiClientSecure client;
 void connectToWiFi() {
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi");
+  Serial.printf("SSID: %s\n", ssid.c_str());
+  Serial.printf("Password: %s\n", password.c_str());
   
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);

@@ -5,7 +5,6 @@ void initPins();
 void initPeripherals();
 
 extern String fw_version;
-
 #define AmbLight        1
 #define Batt_LVL        2
 #define PIR             3
