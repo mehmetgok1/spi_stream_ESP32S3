@@ -17,7 +17,7 @@ uint16_t downsampled16x16[256];  // Shared with BLE for transmission
 uint16_t irFrame16x12[192];      // Shared with BLE for transmission
 
 QueueHandle_t sensorDataQueue = NULL;
-const int SENSOR_QUEUE_SIZE = 3;  // Buffer up to 3 packets (3 seconds of data)
+const int SENSOR_QUEUE_SIZE = 1;  // Buffer up to 3 packets (3 seconds of data)
 
 // ==================== COMBINED DATA PACKET ====================
 #pragma pack(1)
