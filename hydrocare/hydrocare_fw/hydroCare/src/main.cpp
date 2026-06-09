@@ -16,7 +16,7 @@ bool wifi_connect = false; // Flag to trigger WiFi connection in main loop
 bool stream_wifi = false; // Flag to trigger WiFi streaming after session ends
 uint16_t downsampled16x16[256];  // Shared with BLE for transmission
 uint16_t irFrame16x12[192];      // Shared with BLE for transmission
-
+bool debug_infos = false; // Set to true to enable detailed debug prints
 // ==================== COMBINED DATA PACKET ====================
 #pragma pack(1)
 typedef struct {
@@ -112,7 +112,7 @@ void setup() {
   xTaskCreatePinnedToCore(
     sdCardLoggingTask,      // Task function
     "SDLoggingTask",        // Task name
-    4096,                   // Stack size (Reduced to 4KB since CombinedDataPacket is now static)
+    16384,                   // Stack size (Reduced to 4KB since CombinedDataPacket is now static)
     NULL,                   // Parameter
     1,                      // Priority (lower than main)
     &sdTaskHandle,          // Task handle
