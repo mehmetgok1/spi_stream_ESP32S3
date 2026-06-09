@@ -33,7 +33,7 @@ void initSD(){
 
   Serial.print("Mounting SD Card... ");
 
-  if (!SD.begin(SD_CS,SPI, 40000000)) {
+  if (!SD.begin(SD_CS,SPI, 20000000)) {
     for(int i=0; i<5; i++){
         Serial.println("Error: Card not found or wiring incorrect.");
         delay(500);
