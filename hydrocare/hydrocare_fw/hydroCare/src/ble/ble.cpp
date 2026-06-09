@@ -20,6 +20,7 @@ extern bool stream_wifi;
 extern String ssid, password, ver,server_ip; 
 extern bool wifi_connect;  // Flag to trigger WiFi connection in main loop
 extern bool sessionInitialized;  // Set to true when folder/files are ready
+extern uint32_t packetsLogged;   // Bring in the packet counter so we can reset it
 // External buffers from main.cpp and communication functions
 extern uint16_t downsampled16x16[256];  // 16x16 downsampled RGB frame
 extern uint16_t irFrame16x12[192];      // 16x12 IR thermal frame
@@ -87,6 +88,7 @@ class ActionCallbacks: public NimBLECharacteristicCallbacks {
                 deviceStatus = 1;
                 Serial.println("\n[BLE] Logging started - Creating new session folder...");
                 initSessionFolder();     
+                packetsLogged = 0;          // Reset file numbering to _part_0.bin
                 sessionInitialized = true;  // NOW safe to log
                 Serial.println("[BLE] Session files ready for logging");
             }

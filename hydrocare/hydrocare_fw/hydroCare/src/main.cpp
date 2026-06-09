@@ -37,10 +37,10 @@ typedef struct {
 TaskHandle_t sdTaskHandle = NULL;
 SemaphoreHandle_t sdLogMutex = NULL;
 CombinedDataPacket globalLogPacket; // ONE global buffer replaces the 3 separate 24KB buffers!
+uint32_t packetsLogged = 0;
 
 // Creates new binary file every 50 packets (e.g., part_0.bin, part_50.bin, part_100.bin)
 void sdCardLoggingTask(void *parameter) {
-  uint32_t packetsLogged = 0;
   Serial.println("[SD-TASK] SD logging task started (BINARY mode - high speed, 50-packet rotation)");
   while(1) {
 
