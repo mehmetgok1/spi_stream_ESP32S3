@@ -312,7 +312,7 @@ void sendDownsampledImages() {
     
     //Serial.println("[BLE] Image transmission complete!");
 }
-
+extern bool debug_infos;
 void notifyAll() {
     if (!deviceConnected) return;
 
@@ -336,5 +336,8 @@ void notifyAll() {
     sendValue(pMmwaveChar, mmwave);
     
     // 5. Send downsampled 16x16 RGB and 16x12 IR frames every 1 second
+    if(debug_infos){
+      Serial.println("[BLE] Notifying all sensors...");
+    }
     sendDownsampledImages();
 }

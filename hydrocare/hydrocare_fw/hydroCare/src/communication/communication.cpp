@@ -145,6 +145,8 @@ void spiWrite(uint8_t address, uint8_t data) {
 // Special case: address=0 (ADDR_SENSOR_DATA) reads pre-prepared sensor packet
 // Slave has prepared all data BEFORE this transaction (during LOCK command)
 //
+extern bool debug_infos;
+
 void spiReadBulk(uint8_t address, uint8_t *buffer, uint16_t numBytes) {
   if (address > 0x7F) {
     Serial.printf("[SPI Error] Read address 0x%02X exceeds 7-bit space\n", address);
@@ -178,8 +180,9 @@ void spiReadBulk(uint8_t address, uint8_t *buffer, uint16_t numBytes) {
   delayMicroseconds(50);
   digitalWrite(SPI_CS, HIGH);
   spi.endTransaction();
-  
-  Serial.printf("[SPI] Bulk read status: 0x%02X | %u bytes received\n", statusByte, numBytes);
+  if(debug_infos){
+    Serial.printf("[SPI] Bulk read complete: Status=0x%02X, Bytes=%u\n", statusByte, numBytes);
+  }
 }
 
 // ==================== CONVENIENCE FUNCTIONS ====================
@@ -195,7 +198,9 @@ SensorDataPacket* readSlaveData() {
 
   // ========== STEP 1: Set Trigger ==========
   spiWrite(ADDR_CTRL, CTRL_TRIGGER_MEASUREMENT);
-  Serial.println("[Master] write trigger measurement command");
+  if(debug_infos){
+    Serial.println("[Master] write trigger measurement command");
+  }
   delay(1);
   // ========== STEP 2: Poll for MEASURED status ==========
   uint32_t startTime = millis();
@@ -215,7 +220,9 @@ SensorDataPacket* readSlaveData() {
   }
   // ========== STEP 3: Set Lock ==========
   spiWrite(ADDR_CTRL, CTRL_LOCK_BUFFERS);
-  Serial.println("[Master] write lock data trigger");
+  if(debug_infos){
+    Serial.println("[Master] write lock data trigger");
+  }
   delay(10);
   // ========== STEP 4: Poll for LOCKED status ==========
   startTime = millis();
@@ -234,20 +241,25 @@ SensorDataPacket* readSlaveData() {
   }
   // ========== STEP 5: Bulk Read Sensor Data ==========
   spiReadBulk(ADDR_SENSOR_DATA, spiRxBuffer, SPI_BUFFER_SIZE);
-  Serial.println("[Master] Ready to process sensor data packet");
+  if(debug_infos){
+    Serial.println("[Master] Ready to process sensor data packet");
+  }
 
   // ========== STEP 6: Release Lock ==========
   delay(10);
   spiWrite(ADDR_CTRL, CTRL_UNLOCK_BUFFERS);
-  Serial.println("[Master] write unlock buffers command");
+  if(debug_infos){
+    Serial.println("[Master] write unlock buffers command");
+  }
   delay(10);
   // Cast packet directly (data starts at byte 0 - pure sensor packet)
   SensorDataPacket *packet = (SensorDataPacket*)(spiRxBuffer);
   
   // Verify packet integrity
-  Serial.printf("[Packet] Sequence: %u | Temp: %.1f°C | Humidity: %.1f%% | Light: %u\n",
-    packet->sequence, packet->temperature, packet->humidity, packet->ambientLight);
-  
+  if(debug_infos){
+    Serial.printf("[Packet] Sequence: %u | Temp: %.1f°C | Humidity: %.1f%% | Light: %u\n",
+      packet->sequence, packet->temperature, packet->humidity, packet->ambientLight);
+  }
   return packet;
 }
 
