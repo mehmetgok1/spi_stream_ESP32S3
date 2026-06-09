@@ -35,8 +35,10 @@ typedef struct {
 #pragma pack()
 
 TaskHandle_t sdTaskHandle = NULL;
-SemaphoreHandle_t sdLogMutex = NULL;
-CombinedDataPacket globalLogPacket; // ONE global buffer replaces the 3 separate 24KB buffers!
+#define NUM_BUFFERS 3
+QueueHandle_t dataQueue = NULL;
+QueueHandle_t emptyQueue = NULL;
+CombinedDataPacket* packetBuffers[NUM_BUFFERS] = {NULL, NULL, NULL};
 uint32_t packetsLogged = 0;
 
 // Creates new binary file every 50 packets (e.g., part_0.bin, part_50.bin, part_100.bin)
@@ -44,16 +46,16 @@ void sdCardLoggingTask(void *parameter) {
   Serial.println("[SD-TASK] SD logging task started (BINARY mode - 50-packet rotation, safe Open/Close)");
 
   while(1) {
-
-    // Wait for the main loop to signal that new data is ready
-    if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100))) {
+    CombinedDataPacket* packetToWrite = NULL;
+    
+    // Wait infinitely until a pointer is received in the data queue
+    if (xQueueReceive(dataQueue, &packetToWrite, portMAX_DELAY) == pdTRUE) {
       uint32_t taskStart = millis();  // Start timing this packet
       
-      xSemaphoreTake(sdLogMutex, portMAX_DELAY);
-      if (globalLogPacket.slaveData.temperature == 0.0 || globalLogPacket.slaveData.sequence == 0xFFFF) {
+      if (packetToWrite->slaveData.temperature == 0.0 || packetToWrite->slaveData.sequence == 0xFFFF) {
         Serial.printf("[SD-TASK-ERR] Dropped invalid packet (seq=%u, temp=%.1f)\n", 
-                     globalLogPacket.slaveData.sequence, globalLogPacket.slaveData.temperature);
-        xSemaphoreGive(sdLogMutex);
+                     packetToWrite->slaveData.sequence, packetToWrite->slaveData.temperature);
+        xQueueSend(emptyQueue, &packetToWrite, 0); // Return buffer to empty pool
         continue;  
       }
       
@@ -69,7 +71,7 @@ void sdCardLoggingTask(void *parameter) {
         df = SD.open(dataFile, FILE_WRITE);
         if (!df) {
           Serial.printf("[SD-TASK-ERR] Failed to create binary file: %s\n", dataFile);
-          xSemaphoreGive(sdLogMutex);
+          xQueueSend(emptyQueue, &packetToWrite, 0); // Return buffer to empty pool
           continue;
         }
       }
@@ -78,7 +80,7 @@ void sdCardLoggingTask(void *parameter) {
       
       // Chunk the 24KB write into 4KB blocks to prevent ESP32 SD buffer saturation
       size_t totalWritten = 0;
-      const uint8_t* pData = (const uint8_t*)&globalLogPacket;
+      const uint8_t* pData = (const uint8_t*)packetToWrite;
       size_t remaining = sizeof(CombinedDataPacket);
       
       while (remaining > 0) {
@@ -104,8 +106,6 @@ void sdCardLoggingTask(void *parameter) {
       
       uint32_t writeTime = micros() - writeStart;
       
-      xSemaphoreGive(sdLogMutex); // Give back mutex immediately so main loop can prepare next packet
-      
       uint32_t closeStart = micros();
       df.close();  // Close immediately to finalize the FAT table cleanly
       uint32_t closeTime = micros() - closeStart;
@@ -124,6 +124,9 @@ void sdCardLoggingTask(void *parameter) {
                      packetsLogged, writeTime, closeTime, taskDuration);
       }
       Serial.printf("%u, ",packetsLogged);
+
+      // Important: Return the processed buffer pointer back to the emptyQueue
+      xQueueSend(emptyQueue, &packetToWrite, 0);
     } else {
       // Timeout hit, just idle. File is already closed safely on every packet.
     }
@@ -142,7 +145,8 @@ void setup() {
   disableTimer();
   initSPIComm();
   
-  sdLogMutex = xSemaphoreCreateMutex();
+  dataQueue = xQueueCreate(NUM_BUFFERS, sizeof(CombinedDataPacket*));
+  emptyQueue = xQueueCreate(NUM_BUFFERS, sizeof(CombinedDataPacket*));
   
   // Create SD logging task (lower priority, gets 16KB stack - sufficient for CombinedDataPacket)
   xTaskCreatePinnedToCore(
@@ -171,13 +175,48 @@ void loop() {
     wifi_connect = false;  // Reset flag after connecting
   }
   if(deviceStatus==0 && stream_wifi==true){
-    delay(150); // Give SD logging task time to hit timeout and close the active file
+    Serial.println("[MAIN] Stopping logging, waiting for SD card to finish writing...");
+    
+    // 1. Calculate how many buffers we actually allocated
+    int allocatedBuffers = 0;
+    for(int i=0; i<NUM_BUFFERS; i++) {
+      if(packetBuffers[i] != NULL) allocatedBuffers++;
+    }
+    
+    // 2. Wait for all active buffers to return to the emptyQueue (meaning SD task is fully done)
+    int waitTime = 0;
+    while(uxQueueMessagesWaiting(emptyQueue) < allocatedBuffers && waitTime < 300) {
+       delay(10); // Wait up to 3 seconds
+       waitTime++;
+    }
+    
+    // 3. Clear queues and free up the ~72 KB of RAM for the Wi-Fi Stack!
+    xQueueReset(dataQueue);
+    xQueueReset(emptyQueue);
+    
+    for(int i=0; i<NUM_BUFFERS; i++) {
+      if(packetBuffers[i] != NULL) {
+        free(packetBuffers[i]);
+        packetBuffers[i] = NULL;
+      }
+    }
+    
+    Serial.println("[MAIN] Buffers fully freed. Starting Wi-Fi TCP stream.");
     streamFolderToTCP(sessionFolder);
     stream_wifi=false;
   }
   if (deviceConnected && timerStream == 1 && deviceStatus == 1 && sessionInitialized) {
     uint32_t loopStart = millis();
     
+    // ==================== DYNAMICALLY ALLOCATE BUFFERS ====================
+    for(int i=0; i<NUM_BUFFERS; i++) {
+      if(packetBuffers[i] == NULL) {
+        packetBuffers[i] = (CombinedDataPacket*)malloc(sizeof(CombinedDataPacket));
+        if(packetBuffers[i] != NULL) xQueueSend(emptyQueue, &packetBuffers[i], 0);
+        else Serial.println("[MAIN-ERR] Failed to allocate heap buffer!");
+      }
+    }
+
     // ==================== FETCH SLAVE DATA FIRST ====================
     SensorDataPacket* slaveData = readSlaveData(); 
     
@@ -190,27 +229,29 @@ void loop() {
     // ==================== COMBINE AND PUSH TO QUEUE ====================
     if (slaveData != nullptr) {
       
-      xSemaphoreTake(sdLogMutex, portMAX_DELAY);
-
-      // Copy master sensor readings
-      globalLogPacket.batteryLevel = batteryLevel;
-      globalLogPacket.batteryPercentage = batteryPercentage;
-      globalLogPacket.ambLight = ambLight;
-      globalLogPacket.ambLight_Int = ambLight_Int;
-      globalLogPacket.PIRValue = PIRValue;
-      globalLogPacket.movingDist = movingDist;
-      globalLogPacket.movingEnergy = movingEnergy;
-      globalLogPacket.staticDist = staticDist;
-      globalLogPacket.staticEnergy = staticEnergy;
-      globalLogPacket.detectionDist = detectionDist;
+      CombinedDataPacket* currentPacket = NULL;
       
-      // Copy slave sensor data
-      memcpy(&globalLogPacket.slaveData, slaveData, sizeof(SensorDataPacket));
-      
-      xSemaphoreGive(sdLogMutex);
-
-      // Notify SD logging task that new data is ready
-      if (sdTaskHandle != NULL) xTaskNotifyGive(sdTaskHandle);
+      // Try to get a free buffer from the queue (0 block time)
+      if (xQueueReceive(emptyQueue, &currentPacket, 0) == pdTRUE) {
+        
+        currentPacket->batteryLevel = batteryLevel;
+        currentPacket->batteryPercentage = batteryPercentage;
+        currentPacket->ambLight = ambLight;
+        currentPacket->ambLight_Int = ambLight_Int;
+        currentPacket->PIRValue = PIRValue;
+        currentPacket->movingDist = movingDist;
+        currentPacket->movingEnergy = movingEnergy;
+        currentPacket->staticDist = staticDist;
+        currentPacket->staticEnergy = staticEnergy;
+        currentPacket->detectionDist = detectionDist;
+        
+        memcpy(&currentPacket->slaveData, slaveData, sizeof(SensorDataPacket));
+        
+        // Pass the filled pointer to the SD task
+        xQueueSend(dataQueue, &currentPacket, 0);
+      } else {
+        Serial.println("[MAIN-ERR] All 3 buffers full! SD card is too slow. Dropping packet.");
+      }
     }
     
     // ==================== BLE NOTIFICATION PHASE ====================
