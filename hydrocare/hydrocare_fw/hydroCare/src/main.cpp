@@ -88,8 +88,10 @@ void sdCardLoggingTask(void *parameter) {
       uint32_t taskDuration = millis() - taskStart;
       
       // Print detailed timing on every packet (with microsecond precision)
-      Serial.printf("[SD-TASK] Packet #%u | Write: %u µs | Close: %u µs | Total: %u ms\n",
-                   packetsLogged, writeTime, closeTime, taskDuration);
+      if(debug_infos) {
+        Serial.printf("[SD-TASK] Packet #%u | Write: %u µs | Close: %u µs | Total: %u ms\n",
+                     packetsLogged, writeTime, closeTime, taskDuration);
+      }
     }
   }
 }
