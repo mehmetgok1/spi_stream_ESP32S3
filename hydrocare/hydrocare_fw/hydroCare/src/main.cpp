@@ -83,8 +83,19 @@ void sdCardLoggingTask(void *parameter) {
       
       while (remaining > 0) {
         size_t toWrite = (remaining > 4096) ? 4096 : remaining;
-        size_t writtenChunk = df.write(pData, toWrite);
-        if (writtenChunk == 0) break; // SD card timeout/disconnect
+        size_t writtenChunk = 0;
+        int retries = 0;
+        
+        // Robust Retry Mechanism: Wait for SD card internal sector erases (up to 300ms)
+        while (writtenChunk == 0 && retries < 15) {
+          writtenChunk = df.write(pData, toWrite);
+          if (writtenChunk == 0) {
+            retries++;
+            delay(20); // Give the SD card 20ms to breathe before retrying
+          }
+        }
+        
+        if (writtenChunk == 0) break; // Real failure after 300ms of patience
         
         totalWritten += writtenChunk;
         pData += writtenChunk;
@@ -112,7 +123,7 @@ void sdCardLoggingTask(void *parameter) {
         Serial.printf("[SD-TASK] Packet #%u | Write: %u µs | Close: %u µs | Total: %u ms\n",
                      packetsLogged, writeTime, closeTime, taskDuration);
       }
-      Serial.printf("[SD-TASK] Packet #%u, ",packetsLogged);
+      Serial.printf("%u, ",packetsLogged);
     } else {
       // Timeout hit, just idle. File is already closed safely on every packet.
     }
