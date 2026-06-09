@@ -186,7 +186,9 @@ void loop() {
     notifyAll();
     
     // Total loop execution time
-    Serial.printf("[LOOP] Cycle: %u ms (< 1000 ms timer)\n", millis() - loopStart);
+    if(debug_infos){
+      Serial.printf("[LOOP] Cycle: %u ms (< 1000 ms timer)\n", millis() - loopStart);
+    }
     
     timerStream = 0;
   }

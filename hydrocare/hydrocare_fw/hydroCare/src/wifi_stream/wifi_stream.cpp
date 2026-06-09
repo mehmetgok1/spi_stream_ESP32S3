@@ -1,21 +1,23 @@
 #include "wifi_stream.h"
 #include <ble/ble.h>
 #include <WiFi.h>
+#include <HTTPClient.h>
+#include <FS.h>
+#include <SD.h>
 
 extern String server_ip;
+const String DEVICE_ID = "ESP32S3_UNIT_01"; // Unique identifier for this customer device
 
 void streamFolderToTCP(String folderName)
 {
-    uint32_t taskStart = millis();  // Start timing this packet
-    WiFiClient client;
+    uint32_t taskStart = millis();
+    WiFiClient client; // Use WiFiClientSecure here later for HTTPS
+    HTTPClient http;
 
-    if (!client.connect(server_ip.c_str(), 8080))
-    {
-        Serial.println("[TCP-STREAM] Connection failed!");
-        return;
-    }
+    // Construct your backend URL 
+    String serverURL = "http://" + server_ip + ":8000/upload";
 
-    // Iterate based on your known logic (0, 50, 100, 150...)
+    // Iterate through your binary part files on the SD card
     for (int i = 0; i < 10000; i += 50)
     {
         char fileName[128];
@@ -23,32 +25,51 @@ void streamFolderToTCP(String folderName)
 
         File file = SD.open(fileName, FILE_READ);
 
-        // If the file doesn't exist, we assume we have reached the end of the session
+        // End transmission if the next expected file doesn't exist
         if (!file)
         {
-            Serial.printf("[TCP-STREAM] No more files found at index %u. Ending transmission.\n", i);
+            Serial.printf("[HTTP-STREAM] No more files found at index %u. Ending transmission.\n", i);
             break;
         }
 
-        Serial.printf("[TCP-STREAM] Streaming: %s\n", fileName);
+        Serial.printf("[HTTP-STREAM] Preparing payload for: %s (%d bytes)\n", fileName, file.size());
 
-        uint8_t buffer[1024];
-        size_t bytesRead;
-        while ((bytesRead = file.read(buffer, sizeof(buffer))) > 0)
+        // Configure the HTTP endpoint connection
+        if (http.begin(client, serverURL)) 
         {
-            client.write(buffer, bytesRead);
+            // Add metadata via Protocol Headers for customer/session tracking
+            http.addHeader("Content-Type", "application/octet-stream");
+            http.addHeader("X-Device-ID", DEVICE_ID);
+            http.addHeader("X-Folder-Name", folderName);
+            http.addHeader("X-Part-Index", String(i));
             
-            // Yield to background tasks to prevent watchdog resets during large file transfers
-            yield(); 
+            // Stream the file directly from the SD card to the Wi-Fi client.
+            // The library handles chunked streaming natively—no big RAM buffer needed!
+            int httpResponseCode = http.sendRequest("POST", &file, file.size());
+
+            if (httpResponseCode == HTTP_CODE_OK) 
+            {
+                Serial.printf("[HTTP-STREAM] Successfully uploaded part %u\n", i);
+            } 
+            else 
+            {
+                Serial.printf("[HTTP-STREAM] Upload failed for part %u, Error Code: %d (%s)\n", 
+                              i, httpResponseCode, http.errorToString(httpResponseCode).c_str());
+                
+                // Optional: add "break;" or error-handling if you want to abort the session on failure
+            }
+            
+            http.end(); // Clean up connection resources for this request
+        }
+        else
+        {
+            Serial.println("[HTTP-STREAM] Unable to connect to backend server.");
         }
 
         file.close();
+        yield(); // Yield to core tasks to keep the ESP32 system stable
     }
 
-    client.stop();
     uint32_t taskDuration = millis() - taskStart;
-    Serial.printf("[TCP-STREAM] Total streaming duration: %u ms\n", taskDuration);
+    Serial.printf("[HTTP-STREAM] Total upload routine finished in: %u ms\n", taskDuration);
 }
-
-    
-      
