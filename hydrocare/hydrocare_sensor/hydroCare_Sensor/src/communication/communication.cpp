@@ -18,7 +18,7 @@ uint8_t *txBuf;
 // Global SPI transaction (initialized once, reused for all transactions)
 static spi_slave_transaction_t slaveSpiTransaction = {};
 static uint32_t transaction_count = 0;
-
+bool debug_code=false;
 // ============ High-Speed Sampling Ring Buffers (2kHz) ============
 // 5000-sample buffer = 2.5 seconds of continuous data @ 2kHz
 // Large buffer prevents race condition: sampler index always moves far ahead of read position
@@ -225,17 +225,23 @@ void collectMeasurementData() {
   xSemaphoreGive(currentDataMutex);
   uint32_t elapsed = millis() - totalStartTime;
   // ===== MEASUREMENT SUMMARY WITH SENSOR DATA =====
-  Serial.printf("[Measurement] ✓ Complete in %lu ms | ", elapsed);
+  if(debug_code){
+    Serial.printf("[Measurement] ✓ Complete in %lu ms | ", elapsed);
+  }
   uint16_t rgbFst  = currentData.rgbFrame[0];
   uint16_t rgbMid  = currentData.rgbFrame[2048];
   uint16_t rgbLast = currentData.rgbFrame[4095];
-  Serial.printf("RGB[Fst:0x%04X Mid:0x%04X Last:0x%04X] ", rgbFst, rgbMid, rgbLast);
+  if(debug_code){
+    Serial.printf("RGB[Fst:0x%04X Mid:0x%04X Last:0x%04X] ", rgbFst, rgbMid, rgbLast);
+  }
   uint16_t irFst = currentData.irFrame[0];
   uint16_t irMid = currentData.irFrame[96];
   uint16_t irLast = currentData.irFrame[191];
-  Serial.printf("IR[Fst:0x%04X Mid:0x%04X Last:0x%04X] ", irFst, irMid, irLast);
+  if(debug_code){
+    Serial.printf("IR[Fst:0x%04X Mid:0x%04X Last:0x%04X] ", irFst, irMid, irLast);
+    Serial.printf("Seq:%d RingBufIdx:%d TxBufReady\n", sequenceNumber, ringBufferIndex);
+  }
   // Buffer info
-  Serial.printf("Seq:%d RingBufIdx:%d TxBufReady\n", sequenceNumber, ringBufferIndex);
 }
 
 // ============ Background Measurement Task ============
@@ -250,10 +256,14 @@ static void measurementCollectorTask(void *pvParameters) {
       portMAX_DELAY
     );
     if (uxBits & EVENT_TRIGGER_RECEIVED) {
-      Serial.println("[Measurement Task] ⚡ Triggered! Starting data collection...");
+      if(debug_code){
+        Serial.println("[Measurement Task] ⚡ Triggered! Starting data collection...");
+      }
       collectMeasurementData();
       txBuf[1] = STATUS_MEASURED;
-      Serial.println("[Measurement Task] ✓ Data ready, awaiting LOCK command from master");
+      if(debug_code){
+        Serial.println("[Measurement Task] ✓ Data ready, awaiting LOCK command from master");
+      }
     }
   }
 }
@@ -396,20 +406,26 @@ void receiveCommand() {
     if (address == ADDR_CTRL) {
       // ===== CONTROL REGISTER: Measurement control =====
       if (dataValue == CTRL_TRIGGER_MEASUREMENT) {
-        Serial.println("WRITE CTRL: TRIGGER_MEASUREMENT");
+        if(debug_code){
+          Serial.println("WRITE CTRL: TRIGGER_MEASUREMENT");
+        }
         // Only accept TRIGGER if: in correct state AND not in MEASURED limbo
         if ((slaveState == STATE_IDLE || slaveState == STATE_READY_TRANSFER) && txBuf[1] != STATUS_MEASURED) {
           slaveState = STATE_MEASURING;
           txBuf[1] = STATUS_MEASURING;
           // Signal background measurement task
           xEventGroupSetBits(spiEventGroup, EVENT_TRIGGER_RECEIVED);
-          Serial.println("[SPI] ✓ Measurement triggered");
+          if(debug_code){
+            Serial.println("[SPI] ✓ Measurement triggered");
+          }
         } else {
           Serial.printf("ERROR: TRIGGER in state %d, txBuf[1]=0x%02X (ignore)\n", slaveState, txBuf[1]);
         }
       }
       else if (dataValue == CTRL_LOCK_BUFFERS) {
-        Serial.println("WRITE CTRL: LOCK_BUFFERS");
+        if(debug_code){
+          Serial.println("WRITE CTRL: LOCK_BUFFERS");
+        }
         // Lock only if measurement is complete (status byte shows MEASURED)
         if (txBuf[1] == STATUS_MEASURED) {
           xSemaphoreTake(currentDataMutex, portMAX_DELAY);
@@ -425,7 +441,9 @@ void receiveCommand() {
         }
       }
       else if (dataValue == CTRL_UNLOCK_BUFFERS) {
-        Serial.println("WRITE CTRL: UNLOCK_BUFFERS");
+        if(debug_code){
+          Serial.println("WRITE CTRL: UNLOCK_BUFFERS");
+        }
         // Master is done reading - release the lock
         if (slaveState == STATE_READY_TRANSFER) {
           slaveState = STATE_IDLE;
@@ -458,7 +476,9 @@ void receiveCommand() {
     }
   }else {
     if (address == 0x00) {
-      Serial.printf("READ BULK COMMAND ARRIVED: 0x%02X\n", txBuf[1]);
+      if(debug_code){
+        Serial.printf("READ BULK COMMAND ARRIVED: 0x%02X\n", txBuf[1]);
+      }
     }
   }
 }

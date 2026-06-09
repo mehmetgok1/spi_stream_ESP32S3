@@ -201,7 +201,7 @@ SensorDataPacket* readSlaveData() {
   if(debug_infos){
     Serial.println("[Master] write trigger measurement command");
   }
-  delay(1);
+  delay(10);
   // ========== STEP 2: Poll for MEASURED status ==========
   uint32_t startTime = millis();
   uint8_t status = 0;
@@ -212,7 +212,7 @@ SensorDataPacket* readSlaveData() {
       measured = true;
       break;
     }
-    delay(10);
+    delay(5);
   }
   if (!measured) {
     Serial.println("[Master] ERROR: Timeout waiting for STATUS_MEASURED");
@@ -223,7 +223,7 @@ SensorDataPacket* readSlaveData() {
   if(debug_infos){
     Serial.println("[Master] write lock data trigger");
   }
-  delay(10);
+  delay(5);
   // ========== STEP 4: Poll for LOCKED status ==========
   startTime = millis();
   bool locked = false;
@@ -246,12 +246,12 @@ SensorDataPacket* readSlaveData() {
   }
 
   // ========== STEP 6: Release Lock ==========
-  delay(10);
+  delay(5);
   spiWrite(ADDR_CTRL, CTRL_UNLOCK_BUFFERS);
   if(debug_infos){
     Serial.println("[Master] write unlock buffers command");
   }
-  delay(10);
+  delay(5);
   // Cast packet directly (data starts at byte 0 - pure sensor packet)
   SensorDataPacket *packet = (SensorDataPacket*)(spiRxBuffer);
   

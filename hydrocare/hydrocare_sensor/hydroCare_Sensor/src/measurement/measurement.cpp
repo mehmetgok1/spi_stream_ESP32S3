@@ -135,7 +135,7 @@ void measureAmbLight()
   ambLight = (uint16_t)current_uA; // calibration factor (adjust!)
   
   // Debug output to verify sensor is working
-  Serial.printf("[AmbLight] RAW=%d V=%.3fV I=%.2fuA LUX=%u\n", raw, voltage, current_uA, ambLight);
+  //Serial.printf("[AmbLight] RAW=%d V=%.3fV I=%.2fuA LUX=%u\n", raw, voltage, current_uA, ambLight);
 }
 
 void measureMicrophone()

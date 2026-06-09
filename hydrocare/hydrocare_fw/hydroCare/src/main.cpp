@@ -118,7 +118,7 @@ void setup() {
     NULL,                   // Parameter
     1,                      // Priority (lower than main)
     &sdTaskHandle,          // Task handle
-    1                       // Core 1 (leave core 0 for main)
+    0                       // Core 0 
   );
   
   Serial.println("\n=== HYDROCARE MASTER - SPI SENSOR ACQUISITION ===");
