@@ -47,6 +47,10 @@ void sdCardLoggingTask(void *parameter) {
 
   File df;
   uint32_t currentFileIndex = 0xFFFFFFFF;
+  
+  // Your Idea: Sector buffer to strictly align SD writes across packets
+  uint8_t sectorBuffer[4096];
+  size_t sectorOffset = 0;
 
   while(1) {
     CombinedDataPacket* packetToWrite = NULL;
@@ -67,7 +71,14 @@ void sdCardLoggingTask(void *parameter) {
       
       // Only open a new file if we crossed the 50-packet boundary or starting fresh
       if (fileIndex != currentFileIndex || !df) {
-        if (df) df.close(); // Close the previous file safely
+        if (df) {
+          // Flush any remaining unaligned bytes to the current file before rotating
+          if (sectorOffset > 0) {
+            df.write(sectorBuffer, sectorOffset);
+            sectorOffset = 0;
+          }
+          df.close(); // Close the previous file safely
+        }
         
         char dataFile[128];
         snprintf(dataFile, sizeof(dataFile), "/%s/%s_part_%u.bin", sessionFolder.c_str(), sessionFolder.c_str(), fileIndex);
@@ -81,75 +92,66 @@ void sdCardLoggingTask(void *parameter) {
         currentFileIndex = fileIndex;
       }
       
-      size_t expectedSizeAtStart = df.size();
       uint32_t writeStart = micros();  // Microsecond precision for SD timing
       
-      // Chunk the 24KB write into 4KB blocks to prevent ESP32 SD buffer saturation
       size_t totalWritten = 0;
       const uint8_t* pData = (const uint8_t*)packetToWrite;
       size_t remaining = sizeof(CombinedDataPacket);
       int writeErrors = 0;
       
       while (remaining > 0) {
-        size_t toWrite = (remaining > 4096) ? 4096 : remaining;
+        // Calculate how much data we can safely fit into our 4KB sector buffer
+        size_t spaceLeft = 4096 - sectorOffset;
+        size_t chunk = (remaining < spaceLeft) ? remaining : spaceLeft;
         
-        size_t writtenChunk = df.write(pData, toWrite);
+        // Copy data to our perfectly-aligned sector buffer
+        memcpy(&sectorBuffer[sectorOffset], pData, chunk);
+        sectorOffset += chunk;
+        pData += chunk;
+        remaining -= chunk;
+        totalWritten += chunk;
         
-        if (writtenChunk == 0) {
-          writeErrors++;
-          if (writeErrors > 15) {
-            Serial.println("[SD-TASK-ERR] Max SD write errors reached. Aborting packet.");
-            break;
+        // Only trigger a physical SD write when we have exactly 4096 bytes
+        if (sectorOffset == 4096) {
+          size_t writtenChunk = df.write(sectorBuffer, 4096);
+          
+          if (writtenChunk == 0) {
+            writeErrors++;
+            if (writeErrors > 15) {
+              Serial.println("[SD-TASK-ERR] Max SD write errors reached.");
+              break;
+            }
+            Serial.printf("[SD-TASK-WARN] SD stall. Recovering FATFS state (retry %d/15)...\n", writeErrors);
+            df.close();
+            delay(100); // Let the SD card finish its internal garbage collection
+            
+            char recFile[128];
+            snprintf(recFile, sizeof(recFile), "/%s/%s_part_%u.bin", sessionFolder.c_str(), sessionFolder.c_str(), currentFileIndex);
+            df = SD.open(recFile, FILE_APPEND);
+            
+            if (!df) {
+              Serial.println("[SD-TASK-ERR] Failed to reopen file during recovery.");
+              break;
+            }
+            
+            // RECOVERY MAGIC: Undo the RAM pointers!
+            // Since we never passed partial buffers to `df.write`, nothing was lost during `df.close()`.
+            // We just rewind our state and try to push the exact same 4096-byte block again.
+            pData -= chunk;
+            remaining += chunk;
+            totalWritten -= chunk;
+            sectorOffset -= chunk; 
+            
+            continue; 
           }
-          // FATFS error state hit! Retrying on the same 'df' object will instantly return 0.
-          Serial.printf("[SD-TASK-WARN] SD stall. Recovering FATFS state (retry %d/15)...\n", writeErrors);
-          df.close();
-          delay(100); // Give the SD card 100ms to finish its internal block erase
-          char recFile[128];
-          snprintf(recFile, sizeof(recFile), "/%s/%s_part_%u.bin", sessionFolder.c_str(), sessionFolder.c_str(), currentFileIndex);
-          df = SD.open(recFile, FILE_APPEND);
           
-          if (!df) {
-            Serial.println("[SD-TASK-ERR] Failed to reopen file during recovery.");
-            break;
-          }
-          
-          // CRITICAL FIX: Synchronize RAM pointers with actual physical file size on disk
-          // because unflushed buffers might have been lost during close().
-          size_t actualSize = df.size();
-          if (actualSize < expectedSizeAtStart) {
-            Serial.println("[SD-TASK-ERR] FAT corruption detected (size shrank)!");
-            break;
-          }
-          
-          size_t bytesSuccessfullySaved = actualSize - expectedSizeAtStart;
-          if (bytesSuccessfullySaved > sizeof(CombinedDataPacket)) {
-            Serial.println("[SD-TASK-ERR] File size grew beyond current packet!");
-            break;
-          }
-          
-          // Adjust pointers to resume exactly where the file on disk left off
-          pData = (const uint8_t*)packetToWrite + bytesSuccessfullySaved;
-          remaining = sizeof(CombinedDataPacket) - bytesSuccessfullySaved;
-          totalWritten = bytesSuccessfullySaved;
-          
-          continue; // Try writing the correctly adjusted chunk
+          writeErrors = 0; 
+          sectorOffset = 0; // Empty the buffer for the next chunk
+          delay(2); // Give the SD card and FreeRTOS a 2ms breathing room
         }
-        
-        writeErrors = 0; // Reset errors on successful write
-        
-        totalWritten += writtenChunk;
-        pData += writtenChunk;
-        remaining -= writtenChunk;
-        
-        delay(2); // Give the SD card and FreeRTOS a 2ms breathing room between 4KB blocks
       }
       
       uint32_t writeTime = micros() - writeStart;
-      
-      uint32_t closeStart = micros();
-      df.flush();  // Flush instead of close! Saves massive FAT table thrashing.
-      uint32_t closeTime = micros() - closeStart;
       
       if (totalWritten != sizeof(CombinedDataPacket)) {
         Serial.printf("[SD-TASK-ERR] Incomplete write! Expected %d bytes, wrote %d bytes\n", 
@@ -161,8 +163,8 @@ void sdCardLoggingTask(void *parameter) {
       
       // Print detailed timing on every packet (with microsecond precision)
       if(debug_infos) {
-        Serial.printf("[SD-TASK] Packet #%u | Write: %u µs | Close: %u µs | Total: %u ms\n",
-                     packetsLogged, writeTime, closeTime, taskDuration);
+        Serial.printf("[SD-TASK] Packet #%u | Write: %u µs | Total: %u ms\n",
+                     packetsLogged, writeTime, taskDuration);
       }
       Serial.printf("%u, ",packetsLogged);
 
@@ -171,6 +173,11 @@ void sdCardLoggingTask(void *parameter) {
     } else {
       // Timeout hit, check if we need to close the file because logging stopped
       if (deviceStatus == 0 && df) {
+        // Finalize the very last packet's remaining bytes before stopping
+        if (sectorOffset > 0) {
+          df.write(sectorBuffer, sectorOffset);
+          sectorOffset = 0;
+        }
         df.close();
         currentFileIndex = 0xFFFFFFFF; // Reset for the next session
       }
