@@ -45,11 +45,14 @@ uint32_t packetsLogged = 0;
 void sdCardLoggingTask(void *parameter) {
   Serial.println("[SD-TASK] SD logging task started (BINARY mode - 50-packet rotation, safe Open/Close)");
 
+  File df;
+  uint32_t currentFileIndex = 0xFFFFFFFF;
+
   while(1) {
     CombinedDataPacket* packetToWrite = NULL;
     
-    // Wait infinitely until a pointer is received in the data queue
-    if (xQueueReceive(dataQueue, &packetToWrite, portMAX_DELAY) == pdTRUE) {
+    // Wait with a 100ms timeout so we can check if logging stopped
+    if (xQueueReceive(dataQueue, &packetToWrite, pdMS_TO_TICKS(100)) == pdTRUE) {
       uint32_t taskStart = millis();  // Start timing this packet
       
       if (packetToWrite->slaveData.temperature == 0.0 || packetToWrite->slaveData.sequence == 0xFFFF) {
@@ -61,21 +64,24 @@ void sdCardLoggingTask(void *parameter) {
       
       // Calculate which part file to use (every 50 packets = new file)
       uint32_t fileIndex = (packetsLogged / 50) * 50;
-      char dataFile[128];
-      snprintf(dataFile, sizeof(dataFile), "/%s/%s_part_%u.bin", sessionFolder.c_str(), sessionFolder.c_str(), fileIndex);
       
-      // Open file with FILE_APPEND on every packet for 100% FAT safety
-      File df = SD.open(dataFile, FILE_APPEND);
-      if (!df) {
-        Serial.printf("[SD-TASK-WARN] FILE_APPEND failed, attempting FILE_WRITE create for: %s\n", dataFile);
-        df = SD.open(dataFile, FILE_WRITE);
+      // Only open a new file if we crossed the 50-packet boundary or starting fresh
+      if (fileIndex != currentFileIndex || !df) {
+        if (df) df.close(); // Close the previous file safely
+        
+        char dataFile[128];
+        snprintf(dataFile, sizeof(dataFile), "/%s/%s_part_%u.bin", sessionFolder.c_str(), sessionFolder.c_str(), fileIndex);
+        
+        df = SD.open(dataFile, FILE_APPEND);
         if (!df) {
-          Serial.printf("[SD-TASK-ERR] Failed to create binary file: %s\n", dataFile);
+          Serial.printf("[SD-TASK-ERR] Failed to open binary file: %s\n", dataFile);
           xQueueSend(emptyQueue, &packetToWrite, 0); // Return buffer to empty pool
           continue;
         }
+        currentFileIndex = fileIndex;
       }
       
+      size_t expectedSizeAtStart = df.size();
       uint32_t writeStart = micros();  // Microsecond precision for SD timing
       
       // Chunk the 24KB write into 4KB blocks to prevent ESP32 SD buffer saturation
@@ -99,8 +105,35 @@ void sdCardLoggingTask(void *parameter) {
           Serial.printf("[SD-TASK-WARN] SD stall. Recovering FATFS state (retry %d/15)...\n", writeErrors);
           df.close();
           delay(100); // Give the SD card 100ms to finish its internal block erase
-          df = SD.open(dataFile, FILE_APPEND);
-          continue; // Try writing this exact chunk again
+          char recFile[128];
+          snprintf(recFile, sizeof(recFile), "/%s/%s_part_%u.bin", sessionFolder.c_str(), sessionFolder.c_str(), currentFileIndex);
+          df = SD.open(recFile, FILE_APPEND);
+          
+          if (!df) {
+            Serial.println("[SD-TASK-ERR] Failed to reopen file during recovery.");
+            break;
+          }
+          
+          // CRITICAL FIX: Synchronize RAM pointers with actual physical file size on disk
+          // because unflushed buffers might have been lost during close().
+          size_t actualSize = df.size();
+          if (actualSize < expectedSizeAtStart) {
+            Serial.println("[SD-TASK-ERR] FAT corruption detected (size shrank)!");
+            break;
+          }
+          
+          size_t bytesSuccessfullySaved = actualSize - expectedSizeAtStart;
+          if (bytesSuccessfullySaved > sizeof(CombinedDataPacket)) {
+            Serial.println("[SD-TASK-ERR] File size grew beyond current packet!");
+            break;
+          }
+          
+          // Adjust pointers to resume exactly where the file on disk left off
+          pData = (const uint8_t*)packetToWrite + bytesSuccessfullySaved;
+          remaining = sizeof(CombinedDataPacket) - bytesSuccessfullySaved;
+          totalWritten = bytesSuccessfullySaved;
+          
+          continue; // Try writing the correctly adjusted chunk
         }
         
         writeErrors = 0; // Reset errors on successful write
@@ -115,7 +148,7 @@ void sdCardLoggingTask(void *parameter) {
       uint32_t writeTime = micros() - writeStart;
       
       uint32_t closeStart = micros();
-      df.close();  // Close immediately to finalize the FAT table cleanly
+      df.flush();  // Flush instead of close! Saves massive FAT table thrashing.
       uint32_t closeTime = micros() - closeStart;
       
       if (totalWritten != sizeof(CombinedDataPacket)) {
@@ -136,7 +169,11 @@ void sdCardLoggingTask(void *parameter) {
       // Important: Return the processed buffer pointer back to the emptyQueue
       xQueueSend(emptyQueue, &packetToWrite, 0);
     } else {
-      // Timeout hit, just idle. File is already closed safely on every packet.
+      // Timeout hit, check if we need to close the file because logging stopped
+      if (deviceStatus == 0 && df) {
+        df.close();
+        currentFileIndex = 0xFFFFFFFF; // Reset for the next session
+      }
     }
   }
 }
@@ -184,6 +221,8 @@ void loop() {
   }
   if(deviceStatus==0 && stream_wifi==true){
     Serial.println("[MAIN] Stopping logging, waiting for SD card to finish writing...");
+    
+    delay(150); // Ensure SD task hits its 100ms timeout and safely closes the final file
     
     // 1. Calculate how many buffers we actually allocated
     int allocatedBuffers = 0;
