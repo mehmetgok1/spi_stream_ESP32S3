@@ -82,26 +82,34 @@ void sdCardLoggingTask(void *parameter) {
       size_t totalWritten = 0;
       const uint8_t* pData = (const uint8_t*)packetToWrite;
       size_t remaining = sizeof(CombinedDataPacket);
+      int writeErrors = 0;
       
       while (remaining > 0) {
         size_t toWrite = (remaining > 4096) ? 4096 : remaining;
-        size_t writtenChunk = 0;
-        int retries = 0;
         
-        // Robust Retry Mechanism: Wait for SD card internal sector erases (up to 300ms)
-        while (writtenChunk == 0 && retries < 15) {
-          writtenChunk = df.write(pData, toWrite);
-          if (writtenChunk == 0) {
-            retries++;
-            delay(20); // Give the SD card 20ms to breathe before retrying
+        size_t writtenChunk = df.write(pData, toWrite);
+        
+        if (writtenChunk == 0) {
+          writeErrors++;
+          if (writeErrors > 15) {
+            Serial.println("[SD-TASK-ERR] Max SD write errors reached. Aborting packet.");
+            break;
           }
+          // FATFS error state hit! Retrying on the same 'df' object will instantly return 0.
+          Serial.printf("[SD-TASK-WARN] SD stall. Recovering FATFS state (retry %d/15)...\n", writeErrors);
+          df.close();
+          delay(100); // Give the SD card 100ms to finish its internal block erase
+          df = SD.open(dataFile, FILE_APPEND);
+          continue; // Try writing this exact chunk again
         }
         
-        if (writtenChunk == 0) break; // Real failure after 300ms of patience
+        writeErrors = 0; // Reset errors on successful write
         
         totalWritten += writtenChunk;
         pData += writtenChunk;
         remaining -= writtenChunk;
+        
+        delay(2); // Give the SD card and FreeRTOS a 2ms breathing room between 4KB blocks
       }
       
       uint32_t writeTime = micros() - writeStart;
