@@ -256,6 +256,7 @@ void loop() {
     }
     
     Serial.println("[MAIN] Buffers fully freed. Starting Wi-Fi TCP stream.");
+    deallocateSPIBuffer();
     streamFolderToTCP(sessionFolder);
     stream_wifi=false;
   }
@@ -270,6 +271,7 @@ void loop() {
         else Serial.println("[MAIN-ERR] Failed to allocate heap buffer!");
       }
     }
+    allocateSPIBuffer();
 
     // ==================== FETCH SLAVE DATA FIRST ====================
     SensorDataPacket* slaveData = readSlaveData(); 

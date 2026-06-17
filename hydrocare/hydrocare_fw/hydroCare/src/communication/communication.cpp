@@ -14,16 +14,27 @@ void initSPIComm() {
   pinMode(SPI_CS, OUTPUT);
   digitalWrite(SPI_CS, HIGH);
   
-  spiRxBuffer = (uint8_t*) heap_caps_malloc(SPI_BUFFER_SIZE, MALLOC_CAP_DMA);
-  
-  if (!spiRxBuffer) {
-    Serial.println("[Master] DMA allocation failed!");
-    while(1) delay(1000);
+  Serial.println("[Master] SPI Init OK - Protocol-based 10 MHz");
+}
+
+void allocateSPIBuffer() {
+  if (spiRxBuffer == NULL) {
+    spiRxBuffer = (uint8_t*) heap_caps_malloc(SPI_BUFFER_SIZE, MALLOC_CAP_DMA);
+    if (!spiRxBuffer) {
+      Serial.println("[Master] DMA allocation failed!");
+    } else {
+      memset(spiRxBuffer, 0, SPI_BUFFER_SIZE);
+      Serial.println("[Master] SPI DMA buffer allocated");
+    }
   }
-  
-  memset(spiRxBuffer, 0, SPI_BUFFER_SIZE);
-  
-  Serial.println("[Master] SPI Init OK - Protocol-based 10 MHz, 20KB DMA buffer");
+}
+
+void deallocateSPIBuffer() {
+  if (spiRxBuffer != NULL) {
+    heap_caps_free(spiRxBuffer);
+    spiRxBuffer = NULL;
+    Serial.println("[Master] SPI DMA buffer freed");
+  }
 }
 
 // ==================== PROTOCOL IMPLEMENTATION ====================
@@ -195,6 +206,11 @@ void spiReadBulk(uint8_t address, uint8_t *buffer, uint16_t numBytes) {
 // 5. Bulk read sensor data
 // Called from main.cpp every 1 second
 SensorDataPacket* readSlaveData() {
+
+  if (spiRxBuffer == NULL) {
+    Serial.println("[Master] ERROR: SPI RX Buffer not allocated!");
+    return nullptr;
+  }
 
   // ========== STEP 1: Set Trigger ==========
   spiWrite(ADDR_CTRL, CTRL_TRIGGER_MEASUREMENT);
