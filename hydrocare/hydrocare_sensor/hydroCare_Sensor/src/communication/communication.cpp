@@ -274,7 +274,7 @@ static void irSensorBackgroundTask(void *pvParameters) {
   TickType_t lastWakeTime = xTaskGetTickCount();
   while (1) {
     // Precise 200ms timing
-    vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(200));
+    vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(500));
     // Read IR sensor (blocking ~134ms)
     measureIRTemp();
     // Calculate average temperature

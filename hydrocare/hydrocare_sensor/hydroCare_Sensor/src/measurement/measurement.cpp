@@ -200,8 +200,8 @@ void measureCamera()
 }
 void measureIRTemp()
 {
-  myIRcam.clearNewDataBit();
   myIRcam.readTempC(); // read the temperature
+  myIRcam.clearNewDataBit();
 
   // Data is now collected silently in myIRcam.T_o[]
   // No need to print - master will receive data via SPI
