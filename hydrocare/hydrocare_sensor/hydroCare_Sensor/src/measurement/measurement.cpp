@@ -263,14 +263,14 @@ void initIRTemp()
   Serial.println("setup() First 16 words of EEPROM:");
   for (int i = 0; i < 16; i++)
   {
-    Serial.println("EEPROM value at address: 0x" + String(0x2400 + i, HEX) + ", value: 0x" + String(eeData[i], HEX));
+    Serial.println("EEPROM value at address: 0x" + String(0x2400 + i, HEX) + ", value: 0x" + String(myIRcam.eeData[i], HEX));
   }
   Serial.println("setup() Suspicious EEPROM value check:");
   for (int i = 0; i < EEPROM_WORDS; i++)
   {
     if (myIRcam.eeData[i] == 0x0000 || myIRcam.eeData[i] == 0xFFFF)
     {
-      Serial.println("EEPROM value suspicious at address: 0x" + String(0x2400 + i, HEX) + ", value: 0x" + String(eeData[i], HEX));
+      Serial.println("EEPROM value suspicious at address: 0x" + String(0x2400 + i, HEX) + ", value: 0x" + String(myIRcam.eeData[i], HEX));
     }
   }
 #endif
